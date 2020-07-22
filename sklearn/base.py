@@ -37,6 +37,7 @@ _DEFAULT_TAGS = {
     'binary_only': False,
     'requires_fit': True,
     'requires_y': False,
+    'structured_output': False,
     }
 
 
@@ -747,6 +748,10 @@ class MultiOutputMixin:
     def _more_tags(self):
         return {'multioutput': True}
 
+class StructuredOutputMixin:
+    """Mixin to mark estimators that support structured prediction."""
+    def _more_tags(self):
+        return {'structured_output': True}
 
 class _UnstableArchMixin:
     """Mark estimators that are non-determinstic on 32bit or PowerPC"""

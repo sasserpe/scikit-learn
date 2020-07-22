@@ -28,7 +28,7 @@ from ..base import ClassifierMixin
 from ..base import clone
 from ..base import RegressorMixin
 from ..base import is_classifier
-from ..base import MultiOutputMixin
+from ..base import StructuredOutputMixin
 from ..utils import Bunch
 from ..utils import check_array
 from ..utils import check_random_state
@@ -60,9 +60,7 @@ __all__ = ["DecisionTreeClassifier",
 DTYPE = _tree.DTYPE
 DOUBLE = _tree.DOUBLE
 
-CRITERIA_CLF = {"gini": _criterion.Gini, "entropy": _criterion.Entropy}
-CRITERIA_REG = {"mse": _criterion.MSE, "friedman_mse": _criterion.FriedmanMSE,
-                "mae": _criterion.MAE}
+CRITERIA = {"mse": _criterion.KernelizedMSE}
 
 DENSE_SPLITTERS = {"best": _splitter.BestSplitter,
                    "random": _splitter.RandomSplitter}
@@ -75,8 +73,8 @@ SPARSE_SPLITTERS = {"best": _splitter.BestSparseSplitter,
 # =============================================================================
 
 
-class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
-    """Base class for decision trees.
+class BaseKernelizedOutputTree(StructuredOutputMixin, BaseEstimator, metaclass=ABCMeta):
+    """Base class for regression trees with a kernel in the output space.
 
     Warning: This class should not be used directly.
     Use derived classes instead.
@@ -163,41 +161,14 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
 
         # Determine output settings
         n_samples, self.n_features_ = X.shape
-        is_classification = is_classifier(self)
 
         y = np.atleast_1d(y)
         expanded_class_weight = None
 
         if y.ndim == 1:
-            # reshape is necessary to preserve the data contiguity against vs
-            # [:, np.newaxis] that does not.
-            y = np.reshape(y, (-1, 1))
-
-        self.n_outputs_ = y.shape[1]
-
-        if is_classification:
-            check_classification_targets(y)
-            y = np.copy(y)
-
-            self.classes_ = []
-            self.n_classes_ = []
-
-            if self.class_weight is not None:
-                y_original = np.copy(y)
-
-            y_encoded = np.zeros(y.shape, dtype=int)
-            for k in range(self.n_outputs_):
-                classes_k, y_encoded[:, k] = np.unique(y[:, k],
-                                                       return_inverse=True)
-                self.classes_.append(classes_k)
-                self.n_classes_.append(classes_k.shape[0])
-            y = y_encoded
-
-            if self.class_weight is not None:
-                expanded_class_weight = compute_sample_weight(
-                    self.class_weight, y_original)
-
-            self.n_classes_ = np.array(self.n_classes_, dtype=np.intp)
+            raise ValueError("y must be a 2d numpy array of shape "
+                             "n_samples*n_samples (Gramm matrix of the "
+                             "outputs of the learning set), got a 1d array")
 
         if getattr(y, "dtype", None) != DOUBLE or not y.flags.contiguous:
             y = np.ascontiguousarray(y, dtype=DOUBLE)
@@ -241,10 +212,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
 
         if isinstance(self.max_features, str):
             if self.max_features == "auto":
-                if is_classification:
-                    max_features = max(1, int(np.sqrt(self.n_features_)))
-                else:
-                    max_features = self.n_features_
+                max_features = self.n_features_
             elif self.max_features == "sqrt":
                 max_features = max(1, int(np.sqrt(self.n_features_)))
             elif self.max_features == "log2":
@@ -267,7 +235,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
         self.max_features_ = max_features
 
         if len(y) != n_samples:
-            raise ValueError("Number of labels=%d does not match "
+            raise ValueError("Number of outputs=%d does not match "
                              "number of samples=%d" % (len(y), n_samples))
         if not 0 <= self.min_weight_fraction_leaf <= 0.5:
             raise ValueError("min_weight_fraction_leaf must in [0, 0.5]")
@@ -327,12 +295,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
         # Build tree
         criterion = self.criterion
         if not isinstance(criterion, Criterion):
-            if is_classification:
-                criterion = CRITERIA_CLF[self.criterion](self.n_outputs_,
-                                                         self.n_classes_)
-            else:
-                criterion = CRITERIA_REG[self.criterion](self.n_outputs_,
-                                                         n_samples)
+            criterion = CRITERIA[self.criterion](n_samples)
 
         SPLITTERS = SPARSE_SPLITTERS if issparse(X) else DENSE_SPLITTERS
 
@@ -344,14 +307,7 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
                                                 min_weight_leaf,
                                                 random_state)
 
-        if is_classifier(self):
-            self.tree_ = Tree(self.n_features_,
-                              self.n_classes_, self.n_outputs_)
-        else:
-            self.tree_ = Tree(self.n_features_,
-                              # TODO: tree should't need this in this case
-                              np.array([1] * self.n_outputs_, dtype=np.intp),
-                              self.n_outputs_)
+        self.tree_ = Tree(self.n_features_)
 
         # Use BestFirst if max_leaf_nodes given; use DepthFirst otherwise
         if max_leaf_nodes < 0:
@@ -371,10 +327,6 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
                                            min_impurity_split)
 
         builder.build(self.tree_, X, y, sample_weight)
-
-        if self.n_outputs_ == 1 and is_classifier(self):
-            self.n_classes_ = self.n_classes_[0]
-            self.classes_ = self.classes_[0]
 
         self._prune_tree()
 
@@ -398,12 +350,11 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
 
         return X
 
-    def predict(self, X, check_input=True):
-        """Predict class or regression value for X.
+    def decode(self, X, check_input=True):
+        """Predict structured objects for X.
 
-        For a classification model, the predicted class for each sample in X is
-        returned. For a regression model, the predicted value based on X is
-        returned.
+        The predicted structured objects based on X are returned.
+        Performs an argmin research algorithm amongst the possible outputs
 
         Parameters
         ----------
@@ -418,37 +369,16 @@ class BaseDecisionTree(MultiOutputMixin, BaseEstimator, metaclass=ABCMeta):
 
         Returns
         -------
-        y : array-like of shape (n_samples,) or (n_samples, n_outputs)
-            The predicted classes, or the predict values.
+        output : list of StructuredObjects of length n_samples
+              OR array of shape (n_samples,) containing the indices of the output objects (wrt a dictionnary OR wrt the training set indices)
+              OR array of shape (n_samples, vectorial_repr_len) containing the vectorial representations of the structured output objects
+            The predicted objects.
         """
         check_is_fitted(self)
         X = self._validate_X_predict(X, check_input)
-        proba = self.tree_.predict(X)
-        n_samples = X.shape[0]
+        preds = self.tree_.decode(X)
 
-        # Classification
-        if is_classifier(self):
-            if self.n_outputs_ == 1:
-                return self.classes_.take(np.argmax(proba, axis=1), axis=0)
-
-            else:
-                class_type = self.classes_[0].dtype
-                predictions = np.zeros((n_samples, self.n_outputs_),
-                                       dtype=class_type)
-                for k in range(self.n_outputs_):
-                    predictions[:, k] = self.classes_[k].take(
-                        np.argmax(proba[:, k], axis=1),
-                        axis=0)
-
-                return predictions
-
-        # Regression
-        else:
-            if self.n_outputs_ == 1:
-                return proba[:, 0]
-
-            else:
-                return proba[:, :, 0]
+        return preds
 
     def apply(self, X, check_input=True):
         """Return the index of the leaf that each sample is predicted as.

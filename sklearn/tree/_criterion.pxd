@@ -20,8 +20,7 @@ from ._tree cimport UINT32_t         # Unsigned 32 bit integer
 
 cdef class Criterion:
     # The criterion computes the impurity of a node and the reduction of
-    # impurity of a split on that node. It also computes the output statistics
-    # such as the mean in regression and class probabilities in classification.
+    # impurity of a split on that node.
 
     # Internal structures
     cdef const DOUBLE_t[:, ::1] y        # Values of y
@@ -32,21 +31,12 @@ cdef class Criterion:
     cdef SIZE_t pos                      # samples[pos:end] are the samples in the right node
     cdef SIZE_t end
 
-    cdef SIZE_t n_outputs                # Number of outputs
     cdef SIZE_t n_samples                # Number of samples
     cdef SIZE_t n_node_samples           # Number of samples in the node (end-start)
     cdef double weighted_n_samples       # Weighted number of samples (in total)
     cdef double weighted_n_node_samples  # Weighted number of samples in the node
     cdef double weighted_n_left          # Weighted number of samples in the left node
     cdef double weighted_n_right         # Weighted number of samples in the right node
-
-    cdef double* sum_total          # For classification criteria, the sum of the
-                                    # weighted count of each label. For regression,
-                                    # the sum of w*y. sum_total[k] is equal to
-                                    # sum_{i=start}^{end-1} w[samples[i]]*y[samples[i], k],
-                                    # where k is output index.
-    cdef double* sum_left           # Same as above, but for the left side of the split
-    cdef double* sum_right          # same as above, but for the right side of the split
 
     # The criterion object is maintained such that left and right collected
     # statistics correspond to samples[start:pos] and samples[pos:end].
@@ -61,17 +51,18 @@ cdef class Criterion:
     cdef double node_impurity(self) nogil
     cdef void children_impurity(self, double* impurity_left,
                                 double* impurity_right) nogil
-    cdef void node_value(self, double* dest) nogil
     cdef double impurity_improvement(self, double impurity) nogil
     cdef double proxy_impurity_improvement(self) nogil
 
-cdef class ClassificationCriterion(Criterion):
-    """Abstract criterion for classification."""
 
-    cdef SIZE_t* n_classes
-    cdef SIZE_t sum_stride
+cdef class KernelizedRegressionCriterion(Criterion):
+    """Abstract kernelized output regression criterion."""
 
-cdef class RegressionCriterion(Criterion):
-    """Abstract regression criterion."""
-
-    cdef double sq_sum_total
+    cdef double sum_diag_Gramm
+    cdef double sum_total_Gramm
+    
+    cdef double sum_diag_Gramm_left
+    cdef double sum_diag_Gramm_right
+    
+    cdef double sum_total_Gramm_left
+    cdef double sum_total_Gramm_right

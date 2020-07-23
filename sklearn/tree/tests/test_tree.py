@@ -12,57 +12,41 @@ from scipy.sparse import csc_matrix
 from scipy.sparse import csr_matrix
 from scipy.sparse import coo_matrix
 
-from sklearn.random_projection import _sparse_random_matrix
+from ...random_projection import _sparse_random_matrix
 
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import mean_squared_error
+from ...metrics import accuracy_score
+from ...metrics import mean_squared_error
 
-from sklearn.utils._testing import assert_allclose
-from sklearn.utils._testing import assert_array_equal
-from sklearn.utils._testing import assert_array_almost_equal
-from sklearn.utils._testing import assert_almost_equal
-from sklearn.utils._testing import assert_warns
-from sklearn.utils._testing import assert_warns_message
-from sklearn.utils._testing import create_memmap_backed_data
-from sklearn.utils._testing import ignore_warnings
-from sklearn.utils._testing import skip_if_32bit
+from ...utils._testing import assert_allclose
+from ...utils._testing import assert_array_equal
+from ...utils._testing import assert_array_almost_equal
+from ...utils._testing import assert_almost_equal
+from ...utils._testing import assert_warns
+from ...utils._testing import assert_warns_message
+from ...utils._testing import create_memmap_backed_data
+from ...utils._testing import ignore_warnings
+from ...utils._testing import skip_if_32bit
 
-from sklearn.utils.validation import check_random_state
+from ...utils.validation import check_random_state
 
-from sklearn.exceptions import NotFittedError
+from ...exceptions import NotFittedError
 
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.tree import ExtraTreeClassifier
-from sklearn.tree import ExtraTreeRegressor
+from ....tree import OK3Regressor
 
-from sklearn import tree
-from sklearn.tree._tree import TREE_LEAF, TREE_UNDEFINED
-from sklearn.tree._classes import CRITERIA_CLF
-from sklearn.tree._classes import CRITERIA_REG
-from sklearn import datasets
+from ... import tree
+from .._tree import TREE_LEAF, TREE_UNDEFINED
+from ...tree._classes import CRITERIA
+from ... import datasets
 
-from sklearn.utils import compute_sample_weight
+from ...utils import compute_sample_weight
 
-CLF_CRITERIONS = ("gini", "entropy")
-REG_CRITERIONS = ("mse", "mae", "friedman_mse")
+CRITERIONS = ("mse")
 
-CLF_TREES = {
-    "DecisionTreeClassifier": DecisionTreeClassifier,
-    "ExtraTreeClassifier": ExtraTreeClassifier,
+TREES = {
+    "OK3Regressor": OK3Regressor
 }
 
-REG_TREES = {
-    "DecisionTreeRegressor": DecisionTreeRegressor,
-    "ExtraTreeRegressor": ExtraTreeRegressor,
-}
-
-ALL_TREES = dict()
-ALL_TREES.update(CLF_TREES)
-ALL_TREES.update(REG_TREES)
-
-SPARSE_TREES = ["DecisionTreeClassifier", "DecisionTreeRegressor",
-                "ExtraTreeClassifier", "ExtraTreeRegressor"]
+SPARSE_TREES = ["OK3Regressor"]
 
 
 X_small = np.array([
@@ -182,7 +166,7 @@ def assert_tree_equal(d, s, message):
 
 def test_classification_toy():
     # Check classification on a toy dataset.
-    for name, Tree in CLF_TREES.items():
+    for name, Tree in TREES.items():
         clf = Tree(random_state=0)
         clf.fit(X, y)
         assert_array_equal(clf.predict(T), true_result,

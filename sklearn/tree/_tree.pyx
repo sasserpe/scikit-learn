@@ -264,6 +264,8 @@ cdef class DepthFirstTreeBuilder(TreeBuilder):
         
         # feed the tree attribute 'train_samples_in_leaves'
         tree.train_samples_in_leaves = tree.apply(X)
+        # feed the tree attribute 'y'
+        tree.y = y
 
 
 # Best first builder ----------------------------------------------------------
@@ -415,6 +417,8 @@ cdef class BestFirstTreeBuilder(TreeBuilder):
         
         # feed the tree attribute 'train_samples_in_leaves'
         tree.train_samples_in_leaves = tree.apply(X)
+        # feed the tree attribute 'y'
+        tree.y = y
     
     cdef inline int _add_split_node(self, Splitter splitter, Tree tree,
                                     SIZE_t start, SIZE_t end, double impurity,
@@ -515,6 +519,9 @@ cdef class Tree:
     
     train_samples_in_leaves : array of int, shape [n_samples]
         train_samples_in_leaves[i] holds the index of the leaf containing the training sample i.
+    
+    y : array of double, shape [n_samples, n_samples]
+        The training output Gramm matrix (used to calculate the predictions)
 
     children_left : array of int, shape [node_count]
         children_left[i] holds the node id of the left child of node i.
@@ -594,6 +601,7 @@ cdef class Tree:
         self.node_count = 0
         self.capacity = 0
         self.train_samples_in_leaves = np.zeros(0, dtype=np.intp)
+        self.y = NULL
         self.nodes = NULL
 
     def __dealloc__(self):
@@ -714,39 +722,62 @@ cdef class Tree:
 
         return node_id
 
-    cpdef np.ndarray _get_outputs_ndarray(self):
+    cpdef np.ndarray _get_leaves_outputs(self, criterion='KernelizedMSE'):
         """Wraps outputs objects as a 1-d NumPy array. shape (node_count,)
 
         Decode using the search for the output the closer to the mean of the 
         input's leaf in the embedding Hilbert space
         corresponds to the KernelizedMSE criterion
         
-        array[i] is the index of the learning example whose 
-        output has been chosen to represent the output of the leaf i.
+        out[i] is the index of the learning example whose 
+        output has been chosen to represent the output of the leaf i 
+        (if i is a leaf, otherwise it is -1).
         """
-        train_samples_in_leaves = self.train_samples_in_leaves
+        if criterion == 'KernelizedMSE':
+            train_samples_in_leaves = self.train_samples_in_leaves
+            
+            out = np.ones((self.node_count,), dtype=np.npy_intp) * (-1)
+
+            # array to store the value of the criteria to minimize, for each training sample
+            value = np.ones((len(train_samples_in_leaves),), dtype=np.npy_float64) * (-1)
+            
+            # node k
+            for k in range(self.node_count):
+                
+                # extraire toutes les entrées de train_samples_in_leaves qui donnent k
+                train_samples_in_leaf_k = []
+                for i in range(len(train_samples_in_leaves)):
+                    if train_samples_in_leaves[i] == k:
+                        train_samples_in_leaf_k.append(i)
+                
+                # parmi ces entrées j, calculer y[j,j] - 2/self.n_node_samples * sum_i=0^self.n_node_samples y[i,j]
+                for j in train_samples_in_leaf_k:
+                    value[j] = self.y[j,j] - 2 / self.n_node_samples[k] * np.sum(self.y[train_samples_in_leaf_k,j])
+                
+                # choisir l'entrée j* qui donnait la plus petite valeur
+                j_star = np.argmin(value[train_samples_in_leaf_k]):
+                    
+                out[k] = j_star
         
-        # sample_outputs = array(nodecount,)
-        
-        for k in range(self.node_count):
-            # TODO
-            # extraire toutes les entrées de train_samples_in_leaves qui donnent k
-            # parmi ces entrées j, calculer y[j,j] - 2/self.n_node_samples * sum_i=0^self.n_node_samples y[i,j]
-            # choisir l'entrée j* qui donnait la plus petite valeur
-            #sample_outputs[k] = j*
-        
-        # return sample_outputs
+        else:
+            raise NotImplementedError('only the "KernelizedMSE" criterion is supported')
+        return out
     
-    cpdef np.ndarray decode(self, object X):
+    cpdef np.ndarray decode(self, object X, criterion='KernelizedMSE'):
         """Decode target for X."""
         """using the search for the output the closer to the mean of the 
-        input's leaf in the embedding Hilbert space"""
-        """corresponds to the KernelizedMSE criterion"""
-        leaves = self.apply(X)
-        preds = self._get_outputs_ndarray()
-        out = leaves.copy()
-        for i in range(len(out)):
-            out[i] = preds[leaves[i]]
+        input's leaf in the embedding Hilbert space
+        
+        out[i] is the index of the training sample whose output has been chosen
+        to be the output of the i th sample of the X matrix provided"""
+        if criterion == 'KernelizedMSE':
+            leaves = self.apply(X)
+            preds = self._get_leaves_outputs(criterion)
+            out = np.ones_like(leaves) * (-1)
+            for i in range(len(out)):
+                out[i] = preds[leaves[i]]
+        else:
+            raise NotImplementedError('only the "KernelizedMSE" criterion is supported')
         return out
 
     cpdef np.ndarray apply(self, object X):

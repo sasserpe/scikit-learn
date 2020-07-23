@@ -47,6 +47,7 @@ cdef class Tree:
     cdef public SIZE_t node_count        # Counter for node IDs
     cdef public SIZE_t capacity          # Capacity of tree, in terms of nodes
     cdef public np.ndarray train_samples_in_leaves  # Array indicating which training sample falls in which leaf
+    cdef const DOUBLE_t[:, ::1] y        # The training Gramm matrix
     cdef Node* nodes                     # Array of nodes
 
     # Methods
@@ -59,7 +60,7 @@ cdef class Tree:
 
     cdef np.ndarray _get_node_ndarray(self)
 
-    cpdef np.ndarray _get_outputs_ndarray(self)
+    cpdef np.ndarray _get_leaves_outputs(self)
     cpdef np.ndarray decode(self, object X)
 
     cpdef np.ndarray apply(self, object X)
